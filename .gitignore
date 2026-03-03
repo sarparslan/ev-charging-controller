@@ -1,0 +1,18 @@
+# Build output
+__Build/
+bin/
+obj/
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Backup files
+*.bak
+*.old
