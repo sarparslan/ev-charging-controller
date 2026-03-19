@@ -161,4 +161,99 @@ IF rxBmsLimits.oNewData THEN
     g_bms.lastRxTime := g_vcu.systemTime;
 END_IF
 
+
+(* ══════════════════════════════════════════════════════════════
+   CAN4 — EVSE MESSAGES (3 receive)
+   ══════════════════════════════════════════════════════════════ *)
+
+(* ── 6. EVSE Status ── *)
+rxEvseStatus(
+    iCAN           := ADR(g_can4),
+    iCanId         := CAN_ID_EVSE_STATUS,
+    iCanIdExtended := TRUE,
+    iTimeoutLimit  := T#1000MS,
+    oData          => dataEvseStatus
+);
+IF rxEvseStatus.oNewData THEN
+    (* Byte 0 bit 0: available *)
+    g_evse.rx.available      := (dataEvseStatus[0] AND 16#01) <> 0;
+    (* Byte 0 bit 1: isolation valid *)
+    g_evse.rx.isolationValid := (dataEvseStatus[0] AND 16#02) <> 0;
+
+    (* Max voltage: bytes 1-2, 0.1 V/bit *)
+    rawU16 := BYTE_TO_UINT(dataEvseStatus[1])
+           OR SHL(BYTE_TO_UINT(dataEvseStatus[2]), 8);
+    g_evse.rx.maxVoltage := UINT_TO_REAL(rawU16) * 0.1;
+
+    (* Max current: bytes 3-4, 0.1 A/bit *)
+    rawU16 := BYTE_TO_UINT(dataEvseStatus[3])
+           OR SHL(BYTE_TO_UINT(dataEvseStatus[4]), 8);
+    g_evse.rx.maxCurrent := UINT_TO_REAL(rawU16) * 0.1;
+
+    g_evse.commOk     := TRUE;
+    g_evse.lastRxTime := g_vcu.systemTime;
+END_IF
+
+(* ── 7. EVSE Metering ── *)
+rxEvseMetering(
+    iCAN           := ADR(g_can4),
+    iCanId         := CAN_ID_EVSE_METERING,
+    iCanIdExtended := TRUE,
+    iTimeoutLimit  := T#1000MS,
+    oData          => dataEvseMetering
+);
+IF rxEvseMetering.oNewData THEN
+    (* Present voltage: bytes 0-1, 0.1 V/bit, 0xFFFF = invalid *)
+    rawU16 := BYTE_TO_UINT(dataEvseMetering[0])
+           OR SHL(BYTE_TO_UINT(dataEvseMetering[1]), 8);
+    IF rawU16 <> 16#FFFF THEN
+        g_evse.rx.presentVoltage := UINT_TO_REAL(rawU16) * 0.1;
+    ELSE
+        g_evse.rx.presentVoltage := 0.0;
+    END_IF
+
+    (* Present current: bytes 2-3, 0.1 A/bit, 0xFFFF = invalid *)
+    rawU16 := BYTE_TO_UINT(dataEvseMetering[2])
+           OR SHL(BYTE_TO_UINT(dataEvseMetering[3]), 8);
+    IF rawU16 <> 16#FFFF THEN
+        g_evse.rx.presentCurrent := UINT_TO_REAL(rawU16) * 0.1;
+    ELSE
+        g_evse.rx.presentCurrent := 0.0;
+    END_IF
+
+    g_evse.commOk     := TRUE;
+    g_evse.lastRxTime := g_vcu.systemTime;
+END_IF
+
+(* ── 8. EVSE Protocol ── *)
+rxEvseProtocol(
+    iCAN           := ADR(g_can4),
+    iCanId         := CAN_ID_EVSE_PROTOCOL,
+    iCanIdExtended := TRUE,
+    iTimeoutLimit  := T#1000MS,
+    oData          => dataEvseProtocol
+);
+IF rxEvseProtocol.oNewData THEN
+    (* Byte 0 bits 1:0 — charge protocol *)
+    g_evse.rx.protocol := F_ToChargeProtocol(dataEvseProtocol[0] AND 16#03);
+
+    g_evse.commOk     := TRUE;
+    g_evse.lastRxTime := g_vcu.systemTime;
+END_IF
+
+
+(* ══════════════════════════════════════════════════════════════
+   COMMUNICATION TIMEOUT CHECK
+   ══════════════════════════════════════════════════════════════ *)
+
+(* BMS timeout: 500ms *)
+IF (g_vcu.systemTime - g_bms.lastRxTime) > COMM_BMS_TIMEOUT_MS THEN
+    g_bms.commOk := FALSE;
+END_IF
+
+(* EVSE timeout: 1000ms *)
+IF (g_vcu.systemTime - g_evse.lastRxTime) > COMM_EVSE_TIMEOUT_MS THEN
+    g_evse.commOk := FALSE;
+END_IF
+
 END_PROGRAM
