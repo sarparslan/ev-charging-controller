@@ -154,4 +154,86 @@ txChargeStatus(
     iData          := dataChargeStatus
 );
 
+
+(* ══════════════════════════════════════════════════════════════
+   CAN3 — BMS MESSAGES (2 transmit)
+   ══════════════════════════════════════════════════════════════ *)
+
+(* ── 12. BMS Charge Command  (50ms — safety critical) ── *)
+
+(* Byte 0: contactor commands as bit flags *)
+dataBmsChargeCmd[0] := 0;
+IF g_bms.tx.cmdMainPos THEN
+    dataBmsChargeCmd[0] := dataBmsChargeCmd[0] OR 16#01;
+END_IF
+IF g_bms.tx.cmdMainNeg THEN
+    dataBmsChargeCmd[0] := dataBmsChargeCmd[0] OR 16#02;
+END_IF
+IF g_bms.tx.cmdPrecharge THEN
+    dataBmsChargeCmd[0] := dataBmsChargeCmd[0] OR 16#04;
+END_IF
+IF g_bms.tx.cmdAcLine THEN
+    dataBmsChargeCmd[0] := dataBmsChargeCmd[0] OR 16#08;
+END_IF
+
+(* Byte 1: charge enable *)
+IF g_bms.tx.chargeEnable THEN
+    dataBmsChargeCmd[1] := 16#01;
+ELSE
+    dataBmsChargeCmd[1] := 16#00;
+END_IF
+
+(* Byte 2: charge mode *)
+dataBmsChargeCmd[2] := TO_BYTE(g_bms.tx.chargeMode);
+
+(* Bytes 3-7: reserved *)
+dataBmsChargeCmd[3] := 0;
+dataBmsChargeCmd[4] := 0;
+dataBmsChargeCmd[5] := 0;
+dataBmsChargeCmd[6] := 0;
+dataBmsChargeCmd[7] := 0;
+
+txBmsChargeCmd(
+    iEnable        := TRUE,
+    iCAN           := ADR(g_can3),
+    iForceSend     := FALSE,
+    iTransmitRate  := T#50MS,
+    iCanId         := CAN_ID_BMS_CHARGE_CMD,
+    iCanIdExtended := TRUE,
+    iByteCount     := 8,
+    iData          := dataBmsChargeCmd
+);
+
+
+(* ── 13. BMS Charge Limits  (100ms) ── *)
+
+(* Bytes 0-1: target voltage, 0.1 V/bit, little-endian *)
+encU16 := REAL_TO_UINT(g_bms.tx.targetVoltage * 10.0);
+dataBmsChargeLim[0] := TO_BYTE(encU16 AND 16#FF);
+dataBmsChargeLim[1] := TO_BYTE(SHR(encU16, 8) AND 16#FF);
+
+(* Bytes 2-3: target current, 0.1 A/bit, little-endian *)
+encU16 := REAL_TO_UINT(g_bms.tx.targetCurrent * 10.0);
+dataBmsChargeLim[2] := TO_BYTE(encU16 AND 16#FF);
+dataBmsChargeLim[3] := TO_BYTE(SHR(encU16, 8) AND 16#FF);
+
+(* Byte 4: thermal derate factor, 1 %/bit *)
+dataBmsChargeLim[4] := g_bms.tx.derateFactor;
+
+(* Bytes 5-7: reserved *)
+dataBmsChargeLim[5] := 0;
+dataBmsChargeLim[6] := 0;
+dataBmsChargeLim[7] := 0;
+
+txBmsChargeLim(
+    iEnable        := TRUE,
+    iCAN           := ADR(g_can3),
+    iForceSend     := FALSE,
+    iTransmitRate  := T#100MS,
+    iCanId         := CAN_ID_BMS_CHARGE_LIM,
+    iCanIdExtended := TRUE,
+    iByteCount     := 8,
+    iData          := dataBmsChargeLim
+);
+
 END_PROGRAM
