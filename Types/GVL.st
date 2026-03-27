@@ -46,6 +46,25 @@ VAR_GLOBAL CONSTANT
     COMM_BMS_TIMEOUT_MS     : UDINT := 500;
     COMM_EVSE_TIMEOUT_MS    : UDINT := 1000;
 
+    (* ── Charging Limits ── *)
+    CHARGE_VOLTAGE_MIN      : REAL := 200.0;    (* [V] min DC voltage for mode detect *)
+    CHARGE_VOLTAGE_MAX      : REAL := 420.0;    (* [V] max pack voltage *)
+    CHARGE_DC_CURRENT_MAX   : REAL := 200.0;    (* [A] max DC charge current *)
+    CHARGE_AC_CURRENT_MAX   : REAL := 32.0;     (* [A] max AC charge current *)
+    CHARGE_CELL_MV_MAX      : UINT := 4150;     (* [mV] CC->CV transition threshold *)
+    CHARGE_CELL_MV_ABS_MAX  : UINT := 4200;     (* [mV] hard cutoff per cell *)
+    CHARGE_CV_TAPER_A       : REAL := 2.0;      (* [A] CV completion threshold *)
+    SOC_CHARGE_COMPLETE     : USINT := 100;     (* [%] SOC completion target *)
+
+    (* ── Precharge Parameters ── *)
+    PRECHARGE_TOLERANCE_V   : REAL := 10.0;     (* [V] max |bus - pack| delta *)
+    PRECHARGE_TIMEOUT_MS    : UDINT := 5000;    (* [ms] global precharge timeout *)
+
+    (* ── Contactor Timing ── *)
+    CTR_CLOSE_DELAY_MS      : UDINT := 50;      (* [ms] settle time after voltage match *)
+    CTR_WELD_CHECK_MS       : UDINT := 200;     (* [ms] weld detection window *)
+    CTR_FEEDBACK_TIMEOUT_MS : UDINT := 150;     (* [ms] max time for contactor response *)
+
     (* ── Alive Counter ── *)
     ALIVE_COUNTER_MAX       : USINT := 255;
 END_VAR
