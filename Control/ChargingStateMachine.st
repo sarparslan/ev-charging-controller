@@ -155,6 +155,107 @@ E_ChargingState.CHARGE_NEGOTIATE:
         g_charge.state := E_ChargingState.CHARGE_ABORT;
     END_IF
 
+
+(* ─────────────────── ISOLATE ──────────────────────── *)
+E_ChargingState.CHARGE_ISOLATE:
+
+    (* Wait for EVSE to report valid insulation test *)
+    IF g_evse.rx.isolationValid THEN
+        IF g_charge.mode = E_ChargeMode.MODE_DC THEN
+            (* DC: enter precharge sequence *)
+            g_charge.prechargeStep := E_PrechargeStep.PRE_CLOSE_NEG;
+            preEntryTime := g_vcu.systemTime;
+            g_charge.state := E_ChargingState.CHARGE_PRECHARGE;
+        ELSE
+            (* AC: skip precharge, go directly to active *)
+            g_bms.tx.cmdAcLine := TRUE;
+            g_charge.state := E_ChargingState.CHARGE_ACTIVE;
+        END_IF
+    END_IF
+
+    (* Isolation timeout: 30 seconds *)
+    IF (g_vcu.systemTime - stateEntryTime) > 30000 THEN
+        g_charge.state := E_ChargingState.CHARGE_ABORT;
+    END_IF
+
+
+(* ─────────────────── PRECHARGE ────────────────────── *)
+E_ChargingState.CHARGE_PRECHARGE:
+
+    (* DC precharge sub-state machine *)
+    CASE g_charge.prechargeStep OF
+
+        E_PrechargeStep.PRE_CLOSE_NEG:
+            g_bms.tx.cmdMainNeg := TRUE;
+            IF g_bms.rx.fbkMainNeg = E_ContactorState.CTR_CLOSED THEN
+                g_charge.prechargeStep := E_PrechargeStep.PRE_RELAY_ENGAGE;
+                preEntryTime := g_vcu.systemTime;
+            END_IF
+
+        E_PrechargeStep.PRE_RELAY_ENGAGE:
+            g_bms.tx.cmdPrecharge := TRUE;
+            IF g_bms.rx.fbkPrecharge = E_ContactorState.CTR_CLOSED THEN
+                g_charge.prechargeStep := E_PrechargeStep.PRE_VOLTAGE_WAIT;
+                preEntryTime := g_vcu.systemTime;
+            END_IF
+
+        E_PrechargeStep.PRE_VOLTAGE_WAIT:
+            (* Monitor bus voltage vs pack voltage *)
+            g_charge.actualVoltage := g_evse.rx.presentVoltage;
+            voltageDelta := g_bms.rx.packVoltage - g_charge.actualVoltage;
+            IF voltageDelta < 0.0 THEN
+                voltageDelta := -voltageDelta;  (* ABS equivalent *)
+            END_IF
+
+            IF voltageDelta <= PRECHARGE_TOLERANCE_V THEN
+                g_charge.prechargeStep := E_PrechargeStep.PRE_VOLTAGE_OK;
+                preEntryTime := g_vcu.systemTime;
+            END_IF
+
+        E_PrechargeStep.PRE_VOLTAGE_OK:
+            (* Re-check voltage after 50ms settle to confirm stable match *)
+            IF (g_vcu.systemTime - preEntryTime) > CTR_CLOSE_DELAY_MS THEN
+                g_charge.actualVoltage := g_evse.rx.presentVoltage;
+                voltageDelta := g_bms.rx.packVoltage - g_charge.actualVoltage;
+                IF voltageDelta < 0.0 THEN
+                    voltageDelta := -voltageDelta;
+                END_IF
+
+                IF voltageDelta <= PRECHARGE_TOLERANCE_V THEN
+                    g_charge.prechargeStep := E_PrechargeStep.PRE_CLOSE_POS;
+                ELSE
+                    (* Voltage drifted — return to monitoring *)
+                    g_charge.prechargeStep := E_PrechargeStep.PRE_VOLTAGE_WAIT;
+                END_IF
+                preEntryTime := g_vcu.systemTime;
+            END_IF
+
+        E_PrechargeStep.PRE_CLOSE_POS:
+            g_bms.tx.cmdMainPos := TRUE;
+            IF g_bms.rx.fbkMainPos = E_ContactorState.CTR_CLOSED THEN
+                g_charge.prechargeStep := E_PrechargeStep.PRE_RELAY_RELEASE;
+                preEntryTime := g_vcu.systemTime;
+            END_IF
+
+        E_PrechargeStep.PRE_RELAY_RELEASE:
+            (* Open precharge relay — main path now carries current *)
+            g_bms.tx.cmdPrecharge := FALSE;
+            IF g_bms.rx.fbkPrecharge = E_ContactorState.CTR_OPEN THEN
+                g_charge.prechargeStep := E_PrechargeStep.PRE_COMPLETE;
+            END_IF
+
+        E_PrechargeStep.PRE_COMPLETE:
+            (* Precharge done — enter active charging *)
+            g_charge.state := E_ChargingState.CHARGE_ACTIVE;
+
+    END_CASE
+
+    (* Global precharge timeout: 5 seconds *)
+    IF (g_vcu.systemTime - stateEntryTime) > PRECHARGE_TIMEOUT_MS THEN
+        g_charge.prechargeStep := E_PrechargeStep.PRE_TIMEOUT;
+        g_charge.state := E_ChargingState.CHARGE_ABORT;
+    END_IF
+
 END_CASE
 
 (* ══════════════════════════════════════════════════════════════
