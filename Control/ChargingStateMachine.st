@@ -256,6 +256,96 @@ E_ChargingState.CHARGE_PRECHARGE:
         g_charge.state := E_ChargingState.CHARGE_ABORT;
     END_IF
 
+
+(* ─────────────────── ACTIVE ───────────────────────── *)
+E_ChargingState.CHARGE_ACTIVE:
+
+    (* Set vehicle state based on mode *)
+    IF g_charge.mode = E_ChargeMode.MODE_DC THEN
+        g_charge.vehicleState := E_VehicleChargeState.VCS_CHARGING_DC;
+    ELSE
+        g_charge.vehicleState := E_VehicleChargeState.VCS_CHARGING_AC;
+    END_IF
+
+    (* Enable charge on BMS side *)
+    g_bms.tx.chargeEnable := TRUE;
+    g_bms.tx.chargeMode   := g_charge.mode;
+
+    (* ── Current limit = MIN(BMS allowed, EVSE max, mode max) ── *)
+    (* Recomputed every cycle so CV also follows BMS, EVSE and thermal limits *)
+    currentLimit := g_bms.rx.maxChargeCurrent;
+
+    IF g_charge.mode = E_ChargeMode.MODE_DC THEN
+        IF currentLimit > CHARGE_DC_CURRENT_MAX THEN
+            currentLimit := CHARGE_DC_CURRENT_MAX;
+        END_IF
+    ELSE
+        IF currentLimit > CHARGE_AC_CURRENT_MAX THEN
+            currentLimit := CHARGE_AC_CURRENT_MAX;
+        END_IF
+    END_IF
+
+    IF currentLimit > g_evse.rx.maxCurrent THEN
+        currentLimit := g_evse.rx.maxCurrent;
+    END_IF
+
+    (* Apply thermal derating *)
+    currentLimit := currentLimit * USINT_TO_REAL(g_vcu.thermal.derateFactor) / 100.0;
+
+    (* ── CC-CV control logic ── *)
+    (* Phase 1: Constant Current — charge at max rate until cell voltage threshold *)
+    IF g_bms.rx.cellVoltageMax < CHARGE_CELL_MV_MAX THEN
+        g_charge.ccActive := TRUE;
+        g_charge.cvActive := FALSE;
+
+        g_charge.targetCurrent := currentLimit;
+        g_charge.targetVoltage := g_bms.rx.packVoltage;
+
+    (* Phase 2: Constant Voltage — hold voltage, taper current *)
+    ELSE
+        g_charge.ccActive := FALSE;
+        g_charge.cvActive := TRUE;
+
+        g_charge.targetVoltage := CHARGE_VOLTAGE_MAX;
+        (* Current naturally tapers as cells reach full voltage *)
+        g_charge.targetCurrent := currentLimit;
+    END_IF
+
+    (* ── Actual measurement tracking ── *)
+    g_charge.actualVoltage := g_evse.rx.presentVoltage;
+    g_charge.actualCurrent := g_evse.rx.presentCurrent;
+
+    (* ── Energy accumulation: P = V * I, E += P * dt ── *)
+    dtSeconds := 0.010;  (* 10ms cycle *)
+    g_charge.energyDelivered := prevEnergy
+        + (g_charge.actualVoltage
+           * g_charge.actualCurrent
+           * dtSeconds / 3600000.0);     (* W*s -> kWh *)
+    prevEnergy := g_charge.energyDelivered;
+
+    (* ── Session timer ── *)
+    g_charge.sessionTime := g_vcu.systemTime - stateEntryTime;
+
+    (* ── Charge completion conditions ── *)
+    (* SOC target reached *)
+    IF g_bms.rx.soc >= SOC_CHARGE_COMPLETE THEN
+        g_charge.chargeComplete := TRUE;
+        g_charge.state := E_ChargingState.CHARGE_RAMPDOWN;
+    END_IF
+
+    (* CV taper current below threshold *)
+    IF g_charge.cvActive
+       AND g_charge.actualCurrent <= CHARGE_CV_TAPER_A
+       AND g_charge.actualCurrent > 0.0 THEN
+        g_charge.chargeComplete := TRUE;
+        g_charge.state := E_ChargingState.CHARGE_RAMPDOWN;
+    END_IF
+
+    (* Cell over-voltage hard cutoff *)
+    IF g_bms.rx.cellVoltageMax >= CHARGE_CELL_MV_ABS_MAX THEN
+        g_charge.state := E_ChargingState.CHARGE_RAMPDOWN;
+    END_IF
+
 END_CASE
 
 (* ══════════════════════════════════════════════════════════════
