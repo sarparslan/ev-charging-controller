@@ -346,6 +346,93 @@ E_ChargingState.CHARGE_ACTIVE:
         g_charge.state := E_ChargingState.CHARGE_RAMPDOWN;
     END_IF
 
+
+(* ─────────────────── RAMPDOWN ─────────────────────── *)
+E_ChargingState.CHARGE_RAMPDOWN:
+
+    g_charge.vehicleState := E_VehicleChargeState.VCS_CHARGE_ENDING;
+
+    (* Linear current ramp-down over 2 seconds *)
+    IF rampStartCurrent <= 0.0 THEN
+        rampStartCurrent := g_charge.targetCurrent;
+    END_IF
+
+    IF rampStartCurrent > 0.0 THEN
+        g_charge.targetCurrent := rampStartCurrent
+            * (1.0 - UDINT_TO_REAL(g_vcu.systemTime - stateEntryTime) / 2000.0);
+
+        IF g_charge.targetCurrent < 0.0 THEN
+            g_charge.targetCurrent := 0.0;
+        END_IF
+    END_IF
+
+    (* Transition when current reaches zero or 2s elapsed *)
+    IF g_charge.targetCurrent <= 0.0
+       OR (g_vcu.systemTime - stateEntryTime) > 2000 THEN
+        g_charge.targetCurrent := 0.0;
+        g_charge.state := E_ChargingState.CHARGE_WELD_CHECK;
+        rampStartCurrent := 0.0;
+    END_IF
+
+
+(* ──────────────── WELD_CHECK ──────────────────────── *)
+E_ChargingState.CHARGE_WELD_CHECK:
+
+    (* Open all contactors *)
+    g_bms.tx.cmdMainPos   := FALSE;
+    g_bms.tx.cmdMainNeg   := FALSE;
+    g_bms.tx.cmdPrecharge := FALSE;
+    g_bms.tx.cmdAcLine    := FALSE;
+    g_bms.tx.chargeEnable := FALSE;
+
+    (* Wait for weld detection window *)
+    IF (g_vcu.systemTime - stateEntryTime) > CTR_WELD_CHECK_MS THEN
+        IF g_bms.rx.weldDetected THEN
+            (* Weld found -> abort with contactor fault *)
+            g_charge.state := E_ChargingState.CHARGE_ABORT;
+        ELSE
+            g_charge.state := E_ChargingState.CHARGE_COMPLETE;
+        END_IF
+    END_IF
+
+
+(* ─────────────────── COMPLETE ─────────────────────── *)
+E_ChargingState.CHARGE_COMPLETE:
+
+    g_charge.vehicleState := E_VehicleChargeState.VCS_CHARGE_ENDING;
+    g_charge.targetCurrent := 0.0;
+    g_charge.targetVoltage := 0.0;
+    g_charge.ccActive := FALSE;
+    g_charge.cvActive := FALSE;
+    g_bms.tx.chargeEnable := FALSE;
+
+    (* Wait for cable removal to return to idle *)
+    IF g_vcu.pilot.cpState = E_ControlPilot.CP_STATE_A THEN
+        g_charge.state := E_ChargingState.CHARGE_IDLE;
+    END_IF
+
+
+(* ─────────────────── ABORT ────────────────────────── *)
+E_ChargingState.CHARGE_ABORT:
+
+    (* Immediate safe state: open all contactors *)
+    g_bms.tx.cmdMainPos   := FALSE;
+    g_bms.tx.cmdMainNeg   := FALSE;
+    g_bms.tx.cmdPrecharge := FALSE;
+    g_bms.tx.cmdAcLine    := FALSE;
+    g_bms.tx.chargeEnable := FALSE;
+
+    g_charge.targetCurrent := 0.0;
+    g_charge.targetVoltage := 0.0;
+    g_charge.ccActive := FALSE;
+    g_charge.cvActive := FALSE;
+    g_charge.vehicleState := E_VehicleChargeState.VCS_FAULT;
+
+    (* Return to idle once cable is removed *)
+    IF g_vcu.pilot.cpState = E_ControlPilot.CP_STATE_A THEN
+        g_charge.state := E_ChargingState.CHARGE_IDLE;
+    END_IF
+
 END_CASE
 
 (* ══════════════════════════════════════════════════════════════
