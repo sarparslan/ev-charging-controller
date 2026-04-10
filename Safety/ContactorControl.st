@@ -12,6 +12,9 @@
  *  The flag is also set by a BMS weld report and is only cleared by a
  *  power cycle.
  *
+ *  On critical failure (weld), forces all contactor commands to OPEN
+ *  as a last-resort safety measure independent of the state machine.
+ *
  *  Runs as a PROGRAM on CycleSafety task (10 ms period).
  *
  *  Contactors:
@@ -45,6 +48,17 @@ VAR
     preOpenCheck    : BOOL;
     preWeld         : BOOL;
 END_VAR
+
+(* ══════════════════════════════════════════════════════════════
+   EMERGENCY OPEN — if any weld is latched, force all contactors open
+   ══════════════════════════════════════════════════════════════ *)
+IF posWeld OR negWeld OR preWeld OR g_bms.rx.weldDetected THEN
+    g_bms.tx.cmdMainPos   := FALSE;
+    g_bms.tx.cmdMainNeg   := FALSE;
+    g_bms.tx.cmdPrecharge := FALSE;
+    g_bms.tx.cmdAcLine    := FALSE;
+    g_bms.tx.chargeEnable := FALSE;
+END_IF
 
 (* ══════════════════════════════════════════════════════════════
    K1 — MAIN POSITIVE CONTACTOR
