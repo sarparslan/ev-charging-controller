@@ -20,6 +20,8 @@
  *
  *  Losing the BMS or EVSE link in any state from NEGOTIATE onward
  *  (except COMPLETE) aborts the session.
+ *  ACTIVE <-> PAUSED on g_charge.pauseRequest (grid / user).
+ *  PAUSED -> RAMPDOWN on cable removal, -> ABORT on communication loss.
  *
  *  Precharge sub-states:
  *    PRE_CLOSE_NEG -> PRE_RELAY_ENGAGE -> PRE_VOLTAGE_WAIT
@@ -43,6 +45,7 @@ VAR
     dtSeconds       : REAL;        (* cycle time in seconds for energy calc *)
 
     prevEnergy      : REAL;        (* energy accumulator carry-over [kWh] *)
+    sessionTimeBase : UDINT;       (* ACTIVE time accumulated before last pause [ms] *)
 END_VAR
 
 (* ──────────────────────────────────────────────────────────────
@@ -141,6 +144,7 @@ E_ChargingState.CHARGE_NEGOTIATE:
     (* Reset energy counter *)
     g_charge.energyDelivered := 0.0;
     g_charge.sessionTime := 0;
+    sessionTimeBase := 0;
     prevEnergy := 0.0;
 
     (* Transition when mode is determined and EVSE is available *)
@@ -323,8 +327,14 @@ E_ChargingState.CHARGE_ACTIVE:
            * dtSeconds / 3600000.0);     (* W*s -> kWh *)
     prevEnergy := g_charge.energyDelivered;
 
-    (* ── Session timer ── *)
-    g_charge.sessionTime := g_vcu.systemTime - stateEntryTime;
+    (* ── Session timer (excludes time spent in PAUSED) ── *)
+    g_charge.sessionTime := sessionTimeBase + (g_vcu.systemTime - stateEntryTime);
+
+    (* External pause request — completion conditions below take priority *)
+    IF g_charge.pauseRequest THEN
+        sessionTimeBase := g_charge.sessionTime;
+        g_charge.state := E_ChargingState.CHARGE_PAUSED;
+    END_IF
 
     (* ── Charge completion conditions ── *)
     (* SOC target reached *)
@@ -431,6 +441,25 @@ E_ChargingState.CHARGE_ABORT:
     (* Return to idle once cable is removed *)
     IF g_vcu.pilot.cpState = E_ControlPilot.CP_STATE_A THEN
         g_charge.state := E_ChargingState.CHARGE_IDLE;
+    END_IF
+
+
+(* ─────────────────── PAUSED ───────────────────────── *)
+E_ChargingState.CHARGE_PAUSED:
+
+    (* Grid or user requested pause — hold contactors, zero current *)
+    g_charge.targetCurrent := 0.0;
+    g_charge.ccActive := FALSE;
+    g_charge.cvActive := FALSE;
+
+    (* Resume when the external pause request clears *)
+    IF NOT g_charge.pauseRequest THEN
+        g_charge.state := E_ChargingState.CHARGE_ACTIVE;
+    END_IF
+
+    (* Cable removed -> ramp down and open contactors via weld check *)
+    IF g_vcu.pilot.cpState = E_ControlPilot.CP_STATE_A THEN
+        g_charge.state := E_ChargingState.CHARGE_RAMPDOWN;
     END_IF
 
 END_CASE
