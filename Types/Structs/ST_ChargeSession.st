@@ -16,6 +16,7 @@ STRUCT
     ccActive            : BOOL;           (* constant current phase active *)
     cvActive            : BOOL;           (* constant voltage phase active *)
     chargeComplete      : BOOL;           (* session completed normally *)
+    pauseRequest        : BOOL;           (* external pause request (HMI / grid) *)
 
     (* Setpoints *)
     targetVoltage       : REAL;           (* [V] voltage setpoint *)
