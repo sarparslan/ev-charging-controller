@@ -1,5 +1,6 @@
 # Build output
 __Build/
+build/
 bin/
 obj/
 
