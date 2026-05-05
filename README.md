@@ -24,6 +24,63 @@ Control/        Charging state machine, DC and AC charge control
 Safety/         HV contactor monitoring and weld detection
 ```
 
+## Charge Session Lifecycle
+
+```
+IDLE ──► CONNECTED ──► NEGOTIATE ──► ISOLATE ──► PRECHARGE ──► ACTIVE
+                                                                  │
+                         PAUSED ◄──── pauseRequest ────────────►──┤
+                                                                  │
+         IDLE ◄── COMPLETE ◄── WELD_CHECK ◄── RAMPDOWN ◄─────────┘
+         IDLE ◄── ABORT (communication loss / timeout / weld detected)
+```
+
+### State Descriptions
+
+| State | Purpose |
+|-------|---------|
+| **IDLE** | All outputs safe. Waits for CP State B + parking brake |
+| **CONNECTED** | Cable locked. Waits for CP State C + BMS/EVSE comms alive |
+| **NEGOTIATE** | Latches protocol, determines DC/AC mode from EVSE capabilities. 10s timeout |
+| **ISOLATE** | Waits for EVSE insulation test. DC → precharge, AC → direct to active. 30s timeout |
+| **PRECHARGE** | 6-step DC bus voltage equalization with 50ms settle re-check. 5s global timeout |
+| **ACTIVE** | CC-CV charge control with energy accumulation and thermal derating |
+| **RAMPDOWN** | Linear current ramp-down to zero over 2 seconds |
+| **WELD_CHECK** | Opens all contactors, waits 200ms, checks for welded contacts |
+| **COMPLETE** | Charge finished normally. Waits for cable removal |
+| **ABORT** | Emergency safe state. All contactors open, waits for cable removal |
+| **PAUSED** | Entered while `g_charge.pauseRequest` is set (grid/user). Zero current, contactors held. Resumes when the request clears |
+
+## DC Precharge Sequence
+
+The precharge sub-state machine equalizes the HV bus voltage to the battery pack voltage before closing the main contactors, preventing inrush current damage:
+
+```
+PRE_CLOSE_NEG          Close K2 (negative contactor), wait for feedback
+       │
+PRE_RELAY_ENGAGE       Close K3 (precharge relay), current flows through resistor
+       │
+PRE_VOLTAGE_WAIT       Monitor |V_bus - V_pack| until ≤ 10V tolerance
+       │
+PRE_VOLTAGE_OK         50ms debounce re-check — returns to WAIT if voltage drifted
+       │
+PRE_CLOSE_POS          Close K1 (positive contactor), main HV path active
+       │
+PRE_RELAY_RELEASE      Open K3 (no longer needed), confirm open feedback
+       │
+PRE_COMPLETE           → CHARGE_ACTIVE
+```
+
+## CC-CV Charging
+
+The active charge state implements a standard **Constant Current – Constant Voltage** algorithm:
+
+- **CC Phase**: Charges at `MIN(BMS_limit, mode_limit, EVSE_limit) × derateFactor/100` until any cell reaches 4150 mV
+- **CV Phase**: Holds voltage at 420V while current tapers naturally. Completes when taper current falls below 2A
+- **Hard cutoff**: Any cell reaching 4200 mV forces immediate ramp-down
+
+Energy accumulation: `E += V × I × dt / 3,600,000` (W·s → kWh) computed every 10ms cycle.
+
 ## Build Environment
 
 - **Target**: IEC 61131-3 PLC runtime — not yet run on target hardware
