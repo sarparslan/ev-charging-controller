@@ -350,11 +350,58 @@ FUNCTION TestAcSession : BOOL
     Check(g_charge.targetCurrent <= 32.0 + 0.01, 'current clamped to 32 A AC limit');
 END_FUNCTION
 
+FUNCTION TestCvFollowsLimits : BOOL
+    Section('CV phase follows BMS limit');
+    ResetScenario();
+    PlugIn();
+    RunUntil(E_ChargingState.CHARGE_ACTIVE, 5000);
+    Run(500);
+    g_simCellMaxMv := 4160;
+    Run(200);
+    Check(g_charge.cvActive, 'cell above 4150 mV switches to CV');
+    g_simBmsMaxI := 20.0;
+    Run(200);
+    Check(g_charge.targetCurrent <= 20.0 + 0.01, 'CV current request drops with BMS limit');
+    g_simCellMaxMv := 4200;
+    Check(RunUntil(E_ChargingState.CHARGE_RAMPDOWN, 200), '4200 mV hard cutoff ramps down');
+END_FUNCTION
+
+FUNCTION TestPauseResume : BOOL
+VAR
+    tPaused : UDINT;
+END_VAR
+    Section('Pause and resume');
+    ResetScenario();
+    PlugIn();
+    RunUntil(E_ChargingState.CHARGE_ACTIVE, 5000);
+    Run(1000);
+    g_charge.pauseRequest := TRUE;
+    Check(RunUntil(E_ChargingState.CHARGE_PAUSED, 100), 'pauseRequest enters PAUSED');
+    Run(100);
+    tPaused := g_charge.sessionTime;
+    Check(g_charge.targetCurrent = 0.0, 'current request is zero while paused');
+    Check(g_bms.tx.cmdMainPos AND g_bms.tx.cmdMainNeg, 'contactors held closed while paused');
+    Run(3000);
+    Check(g_charge.sessionTime = tPaused, 'session time frozen while paused');
+    g_charge.pauseRequest := FALSE;
+    Check(RunUntil(E_ChargingState.CHARGE_ACTIVE, 100), 'clearing the request resumes ACTIVE');
+    Run(500);
+    Check(g_charge.sessionTime > tPaused AND g_charge.sessionTime < tPaused + 1000,
+          'session time continues from before the pause');
+    g_charge.pauseRequest := TRUE;
+    RunUntil(E_ChargingState.CHARGE_PAUSED, 100);
+    g_vcu.pilot.cpState := E_ControlPilot.CP_STATE_A;
+    Check(RunUntil(E_ChargingState.CHARGE_COMPLETE, 3000), 'unplug while paused ramps down to COMPLETE');
+    Check(NOT g_bms.tx.cmdMainPos, 'contactors opened after unplug while paused');
+END_FUNCTION
+
 FUNCTION main : DINT
     printf('EV charging controller - scenario tests$N');
     TestCanDecoding();
     TestDcSession();
     TestAcSession();
+    TestCvFollowsLimits();
+    TestPauseResume();
     printf('$N%d tests, %d failed$N', g_testsRun, g_testsFailed);
     IF g_testsFailed = 0 THEN
         main := 0;
