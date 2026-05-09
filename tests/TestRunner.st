@@ -395,6 +395,64 @@ END_VAR
     Check(NOT g_bms.tx.cmdMainPos, 'contactors opened after unplug while paused');
 END_FUNCTION
 
+FUNCTION TestCommLossInPrecharge : BOOL
+    Section('BMS link lost during precharge');
+    ResetScenario();
+    PlugIn();
+    RunUntil(E_ChargingState.CHARGE_PRECHARGE, 2000);
+    g_simBmsAlive := FALSE;
+    Check(RunUntil(E_ChargingState.CHARGE_ABORT, 1000), 'aborts within 1 s, before the 5 s precharge timeout');
+    Run(20);
+    Check(NOT g_bms.tx.cmdMainNeg AND NOT g_bms.tx.cmdPrecharge, 'contactors commanded open');
+    Check((SimTxByte(CAN_ID_CHARGE_REQUEST, 2) AND 16#02) <> 0, 'emergency stop sent to EVSE');
+END_FUNCTION
+
+FUNCTION TestCommLossWhileCharging : BOOL
+    Section('EVSE link lost while charging');
+    ResetScenario();
+    PlugIn();
+    RunUntil(E_ChargingState.CHARGE_ACTIVE, 5000);
+    Run(500);
+    g_simEvseAlive := FALSE;
+    Check(RunUntil(E_ChargingState.CHARGE_ABORT, 1500), 'aborts after the 1000 ms EVSE watchdog');
+END_FUNCTION
+
+FUNCTION TestTimeouts : BOOL
+    Section('Timeouts');
+    ResetScenario();
+    g_simEvseAvail := FALSE;
+    PlugIn();
+    Check(RunUntil(E_ChargingState.CHARGE_NEGOTIATE, 500), 'enters NEGOTIATE');
+    Run(9000);
+    Check(g_charge.state = E_ChargingState.CHARGE_NEGOTIATE, 'still negotiating before 10 s');
+    Check(RunUntil(E_ChargingState.CHARGE_ABORT, 2000), 'negotiation times out after 10 s');
+
+    ResetScenario();
+    g_simBusBlocked := TRUE;
+    PlugIn();
+    RunUntil(E_ChargingState.CHARGE_PRECHARGE, 2000);
+    Check(RunUntil(E_ChargingState.CHARGE_ABORT, 6000), 'precharge times out when bus never rises');
+    Check(g_charge.prechargeStep = E_PrechargeStep.PRE_TIMEOUT, 'precharge step reports PRE_TIMEOUT');
+END_FUNCTION
+
+FUNCTION TestAliveCounter : BOOL
+VAR
+    a, b   : BYTE;
+    stepOk : BOOL;
+END_VAR
+    Section('Charge request alive counter');
+    ResetScenario();
+    a := SimTxByte(CAN_ID_CHARGE_REQUEST, 1);
+    Cycle();
+    b := SimTxByte(CAN_ID_CHARGE_REQUEST, 1);
+    IF a = 255 THEN
+        stepOk := b = 0;
+    ELSE
+        stepOk := b = a + 1;
+    END_IF
+    Check(stepOk, 'increments every cycle and wraps 255 -> 0');
+END_FUNCTION
+
 FUNCTION main : DINT
     printf('EV charging controller - scenario tests$N');
     TestCanDecoding();
@@ -402,6 +460,10 @@ FUNCTION main : DINT
     TestAcSession();
     TestCvFollowsLimits();
     TestPauseResume();
+    TestCommLossInPrecharge();
+    TestCommLossWhileCharging();
+    TestTimeouts();
+    TestAliveCounter();
     printf('$N%d tests, %d failed$N', g_testsRun, g_testsFailed);
     IF g_testsFailed = 0 THEN
         main := 0;
