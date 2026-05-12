@@ -81,6 +81,23 @@ The active charge state implements a standard **Constant Current – Constant Vo
 
 Energy accumulation: `E += V × I × dt / 3,600,000` (W·s → kWh) computed every 10ms cycle.
 
+## CAN Communication
+
+| Bus | Device | Messages | Cycle |
+|-----|--------|----------|-------|
+| CAN3 | BMS | 5 RX + 2 TX | RX: event, TX: 50ms / 100ms |
+| CAN4 | EVSE | 3 RX + 3 TX | RX: event, TX: 100ms / 250ms |
+
+- **Encoding**: little-endian; voltage and current 0.1/bit, current offset −3200 A, temperature offset −40 °C
+- **Watchdogs**: BMS 500 ms, EVSE 1000 ms, rollover-safe; losing either link at any point after CONNECTED triggers ABORT
+
+## Safety
+
+- **Contactor monitoring** runs on its own safety task: 150 ms feedback timeout on close and open
+- **Weld detection** latches if a contactor stays closed after an open command (or the BMS reports a weld), forces all contactors open, and blocks new sessions until power cycle
+- **Precharge** re-checks the bus voltage after 50 ms before closing K1
+- **Strict enums** (`{attribute 'strict'}`) give compile-time type safety
+
 ## Build Environment
 
 - **Target**: IEC 61131-3 PLC runtime — not yet run on target hardware
