@@ -453,6 +453,28 @@ END_VAR
     Check(stepOk, 'increments every cycle and wraps 255 -> 0');
 END_FUNCTION
 
+(* Must run last: weld latches stay set until power cycle *)
+FUNCTION TestWeldDetection : BOOL
+    Section('Welded K1 at end of session');
+    ResetScenario();
+    PlugIn();
+    RunUntil(E_ChargingState.CHARGE_ACTIVE, 5000);
+    Run(500);
+    g_simK1Stuck := TRUE;
+    g_simSoc := 100;
+    Check(RunUntil(E_ChargingState.CHARGE_WELD_CHECK, 3000), 'reaches WELD_CHECK');
+    Check(RunUntil(E_ChargingState.CHARGE_ABORT, 1000), 'welded contactor aborts instead of completing');
+    Check(g_bms.rx.weldDetected, 'weld flag latched by ContactorControl');
+    Run(500);
+    Check(NOT g_bms.tx.cmdMainPos AND NOT g_bms.tx.cmdMainNeg AND NOT g_bms.tx.chargeEnable,
+          'emergency override keeps everything open');
+    g_vcu.pilot.cpState := E_ControlPilot.CP_STATE_A;
+    Check(RunUntil(E_ChargingState.CHARGE_IDLE, 500), 'unplug returns to IDLE');
+    PlugIn();
+    Run(1000);
+    Check(g_charge.state = E_ChargingState.CHARGE_IDLE, 'no new session starts with a latched weld');
+END_FUNCTION
+
 FUNCTION main : DINT
     printf('EV charging controller - scenario tests$N');
     TestCanDecoding();
@@ -464,6 +486,7 @@ FUNCTION main : DINT
     TestCommLossWhileCharging();
     TestTimeouts();
     TestAliveCounter();
+    TestWeldDetection();
     printf('$N%d tests, %d failed$N', g_testsRun, g_testsFailed);
     IF g_testsFailed = 0 THEN
         main := 0;
