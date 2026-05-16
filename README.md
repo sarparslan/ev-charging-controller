@@ -1,5 +1,7 @@
 # EV Charging Controller
 
+[![tests](https://github.com/sarparslan/ev-charging-controller/actions/workflows/tests.yml/badge.svg)](https://github.com/sarparslan/ev-charging-controller/actions/workflows/tests.yml)
+
 IEC 61131-3 Structured Text implementation of a Vehicle Control Unit (VCU) charging subsystem for electric vehicles. Written for IEC 61131-3 PLC runtimes, this project manages the complete DC and AC charge session lifecycle — from cable insertion through energy transfer to safe disconnect.
 
 ## Architecture
@@ -22,6 +24,7 @@ Types/          Enums, structs and GVL (CAN IDs, constants)
 Communication/  CAN RX decode (8 msgs) and TX encode (5 msgs)
 Control/        Charging state machine, DC and AC charge control
 Safety/         HV contactor monitoring and weld detection
+tests/          Scenario tests, simulated BMS/EVSE and platform mocks
 ```
 
 ## Charge Session Lifecycle
@@ -97,6 +100,16 @@ Energy accumulation: `E += V × I × dt / 3,600,000` (W·s → kWh) computed eve
 - **Weld detection** latches if a contactor stays closed after an open command (or the BMS reports a weld), forces all contactors open, and blocks new sessions until power cycle
 - **Precharge** re-checks the bus voltage after 50 ms before closing K1
 - **Strict enums** (`{attribute 'strict'}`) give compile-time type safety
+
+## Testing
+
+The controller is verified off-target with the open-source [RuSTy](https://github.com/PLC-lang/rusty) IEC 61131-3 compiler. `tests/run.sh` compiles the real sources together with mocks for the platform libraries and runs them cycle by cycle against a simulated BMS and EVSE that talk to the VCU only through CAN frames.
+
+```bash
+tests/run.sh
+```
+
+Scenarios cover a full DC session (including contactor order), AC mode, CC→CV transition, pause/resume, comm loss during precharge and while charging, negotiation and precharge timeouts, the alive counter, and weld detection. The same tests run in GitHub Actions on every push.
 
 ## Build Environment
 
