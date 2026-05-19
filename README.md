@@ -111,6 +111,16 @@ tests/run.sh
 
 Scenarios cover a full DC session (including contactor order), AC mode, CC→CV transition, pause/resume, comm loss during precharge and while charging, negotiation and precharge timeouts, the alive counter, and weld detection. The same tests run in GitHub Actions on every push.
 
+## Standards & References
+
+| Standard | Application |
+|----------|-------------|
+| IEC 61851-1 | Control Pilot state machine (CP states A–F) |
+| IEC 61131-3 | Structured Text programming language |
+| DIN 70121 | DC charging communication protocol |
+| ISO 15118 | Plug & Charge, bidirectional communication |
+| SAE J1939 | CAN extended frame format (29-bit identifiers) |
+
 ## Build Environment
 
 - **Target**: IEC 61131-3 PLC runtime — not yet run on target hardware
