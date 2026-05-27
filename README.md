@@ -29,14 +29,7 @@ tests/          Scenario tests, simulated BMS/EVSE and platform mocks
 
 ## Charge Session Lifecycle
 
-```
-IDLE ──► CONNECTED ──► NEGOTIATE ──► ISOLATE ──► PRECHARGE ──► ACTIVE
-                                                                  │
-                         PAUSED ◄──── pauseRequest ────────────►──┤
-                                                                  │
-         IDLE ◄── COMPLETE ◄── WELD_CHECK ◄── RAMPDOWN ◄─────────┘
-         IDLE ◄── ABORT (communication loss / timeout / weld detected)
-```
+![Charging state machine](docs/state-machine.png)
 
 ### State Descriptions
 
@@ -56,23 +49,9 @@ IDLE ──► CONNECTED ──► NEGOTIATE ──► ISOLATE ──► PRECHAR
 
 ## DC Precharge Sequence
 
-The precharge sub-state machine equalizes the HV bus voltage to the battery pack voltage before closing the main contactors, preventing inrush current damage:
+![HV power path and precharge order](docs/hv-power-path.png)
 
-```
-PRE_CLOSE_NEG          Close K2 (negative contactor), wait for feedback
-       │
-PRE_RELAY_ENGAGE       Close K3 (precharge relay), current flows through resistor
-       │
-PRE_VOLTAGE_WAIT       Monitor |V_bus - V_pack| until ≤ 10V tolerance
-       │
-PRE_VOLTAGE_OK         50ms debounce re-check — returns to WAIT if voltage drifted
-       │
-PRE_CLOSE_POS          Close K1 (positive contactor), main HV path active
-       │
-PRE_RELAY_RELEASE      Open K3 (no longer needed), confirm open feedback
-       │
-PRE_COMPLETE           → CHARGE_ACTIVE
-```
+The precharge sub-state machine equalizes the HV bus voltage to the battery pack voltage before closing the main contactors, preventing inrush current damage.
 
 ## CC-CV Charging
 
@@ -86,6 +65,8 @@ Energy accumulation: `E += V × I × dt / 3,600,000` (W·s → kWh) computed eve
 
 ## CAN Communication
 
+![CAN message flow between VCU, BMS and EVSE](docs/can-message-flow.png)
+
 | Bus | Device | Messages | Cycle |
 |-----|--------|----------|-------|
 | CAN3 | BMS | 5 RX + 2 TX | RX: event, TX: 50ms / 100ms |
@@ -95,6 +76,8 @@ Energy accumulation: `E += V × I × dt / 3,600,000` (W·s → kWh) computed eve
 - **Watchdogs**: BMS 500 ms, EVSE 1000 ms, rollover-safe; losing either link at any point after CONNECTED triggers ABORT
 
 ## Safety
+
+![Contactor control on the safety task](docs/contactor-control.png)
 
 - **Contactor monitoring** runs on its own safety task: 150 ms feedback timeout on close and open
 - **Weld detection** latches if a contactor stays closed after an open command (or the BMS reports a weld), forces all contactors open, and blocks new sessions until power cycle
