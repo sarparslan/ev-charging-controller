@@ -1,0 +1,7 @@
+# IEC 61131-3 Structured Text (.st) is not a GitHub Linguist language and gets
+# misdetected as Smalltalk. Keep it out of the language stats and highlight it
+# with Pascal, whose syntax (IF/THEN, :=, (* *) comments) is the closest match.
+*.st linguist-language=Pascal linguist-detectable=false
+
+# Helper script for the test runner, not the project's language.
+*.sh linguist-detectable=false
